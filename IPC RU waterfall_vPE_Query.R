@@ -258,7 +258,8 @@ inner join purchase_order_items as poi
 on poi.purchase_order_id = po.id and 
 date(po.created_at) >=  '2016-11-01'"
 proc_connect<-  odbcConnect("Proc_b2b_flo")
-po_adh <- sqlQuery(proc_connect,po_query)
+po_adh <- sqlQuery(proc_connect,po_query) # needed only for 10 weeks
+
 
 po_adh$created_at <- with(po_adh,as.Date(po_adh$created_at))
 po_adh$weeknum<-week(po_adh$created_at)
