@@ -1,6 +1,6 @@
 #1
 ########## Placement Issues - Placement NOT Possible ##########
-#Whatif I change any file
+
 
 # Creating Master files -- For placement issues
 master_temp <- merge(dest_fsn_fc,lzn_3,by.x=c('dest_pincode','FC'),by.y=c('Destination_Pincode','FC'),all.x=TRUE)
@@ -134,6 +134,11 @@ leadtime_1$reco_week<- with(leadtime_1,week(reco_date))
 
 reco_leadtime<-merge(leadtime_1, reco_file, by.x=c("fsn","FC","reco_week"), by.y=c("FSN","FC","weeknum"))
 save.image(paste0(save_path,temp_week,"_pre_forecast.RData"))
+
+leadtime_1 <- left_join(leadtime_1, cat_leadtime)
+
+
+
 
 #5
 # Forecast Loss

@@ -41,8 +41,8 @@ min_sale_depth <- read.csv("\\\\172.20.188.71\\Output2\\min_sales_depth.csv")
 exclusion_list<- read.csv("\\\\172.20.188.71\\ipc\\Instock Report\\Input\\Exclusion_list.csv")
 preferred_wh <- read.csv("\\\\172.20.188.71\\Asan\\preferred_wh_mapping.csv")
 # preferred_wh <- read.csv(paste0(read_path,"/preferred_wh_mapping.csv"))
-# read_path <- "//172.20.188.71/Output2"
-read_path <- "G:/Pulkit/Explain_Fulfill"
+read_path <- "//10.84.72.62/Pulkit/RU/Explain_Fulfill"
+# read_path <- "G:/Pulkit/Explain_Fulfill"
 lzn_static <- read.csv(paste0(read_path,"/lzn_files/lzn_static.csv"))
 lzn_map <- read.csv(paste0(read_path,"/lzn_files/source_id-pincode.csv"))
 lzn_tier <- read.csv(paste0(read_path,"/lzn_files/sla_tier.csv"))
@@ -372,7 +372,7 @@ save.image(paste0(save_path,temp_week,"_pre_forecast.RData"))
 ####### Forecast Qty & NDOH #########
 # load(paste0(save_path,temp_week,"_pre_forecast.RData"))
 
-preferred_wh <- read.csv("preferred_wh_mapping.csv")
+# preferred_wh <- read.csv("preferred_wh_mapping.csv") - reading from IPC
 
 sales_forecast <- left_join(preferred_wh,sales_fsn_dp,by='dest_pincode') %>%
   group_by(fsn,preferred_wh) %>% summarise(sales=sum(sales)) %>% rename(source_id=preferred_wh) %>% as.data.frame()
@@ -611,7 +611,7 @@ path <-paste0(save_path,"/ru_agg_new_wk",temp_week,".csv")
 write.csv(ru_agg,path,row.names=FALSE)
 # path <-paste("\\\\172.20.188.71\\QV App\\Waterfall Output\\RU\\ru_waterfall_",temp_week,".csv")
 path <-paste0(save_path,"/ru_waterfall_new_wk",temp_week,".csv")
-write.csv(rru_waterfall_final,path,row.names=FALSE)
+write.csv(ru_waterfall_final,path,row.names=FALSE)
 detach(package:lubridate)
 
 
