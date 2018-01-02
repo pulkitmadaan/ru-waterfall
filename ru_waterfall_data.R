@@ -44,11 +44,12 @@ lzn_mapping <- lzn_mapping %>% filter(lzn_value!="" & lzn_value!='0') %>%
   
 lzn_mapping_2 <- subset(lzn_mapping, dest_pincode %in% sales$destination_pincode)
 
-dest_fsn <- sales %>% select(fsn,dest_pincode,brand,bu,category,vertical) %>% distinct
+dest_fsn <- sales %>% select(fsn,dest_pincode,brand,bu,category,vertical) %>% distinct %>%
+  mutate(dest_pincode=as.factor(dest_pincode))
 fc<-data.frame(unique(lzn_mapping_2$fc))
 dest_fsn_fc <- merge(dest_fsn,fc,by=NULL) 
 names(dest_fsn_fc)[ncol(dest_fsn_fc)]<- "fc"
 
 vendor_site_2 <- vendor_site %>% group_by(fsn,fc) %>% mutate(vendors=n_distinct(vsid)) #debug this
-vendor_test <- vendor_site %>% select(fsn,fc) %>% distinct
+vendor_test <- vendor_site %>% select(fsn,fc) %>% distinct 
 
