@@ -22,9 +22,9 @@ temp_week<-week(wk_end_date)
 #### Reading Files ####
 # list.files(ru_path)
 sales<- read.csv(paste0(ru_path,"/fsn_fc_pincode_day_sales.csv"),nrows=2000)
-lzn_mapping <- read.csv(paste0(ru_path,"/lzn_mapping.csv"),nrows=2000)
+lzn_mapping <- read.csv(paste0(ru_path,"/lzn_mapping.csv"))
 vendor_site <- read.csv(paste0(ru_path,"/vendor_site.csv"))
-tlead_time <- read.csv(paste0(ru_path,"/fsn_fc_lead_time.csv"),nrows=2000)
+lead_time <- read.csv(paste0(ru_path,"/fsn_fc_lead_time.csv"),nrows=2000)
 cat_lead_time <- read.csv(paste0(ru_path,"/cat_lead_time.csv"))
 min_sale_threshold <- read.csv(paste0(ru_path,"/min_sales_Depth.csv"))
 exclusion_list <- read.csv(paste0(ru_path,"/exclusion_list.csv"))
@@ -42,7 +42,7 @@ lzn_mapping <- lzn_mapping %>% filter(lzn_value!="" & lzn_value!='0') %>%
   rename(fc=src_fc_code) %>% 
   mutate(dest_pincode=as.factor(dest_pincode),src_pincode=as.factor(src_pincode))
   
-lzn_mapping_2 <- subset(lzn_mapping, dest_pincode %in% sales$destination_pincode)
+lzn_mapping_2 <- subset(lzn_mapping, dest_pincode %in% sales$dest_pincode)
 
 dest_fsn <- sales %>% select(fsn,dest_pincode,brand,bu,category,vertical) %>% distinct %>%
   mutate(dest_pincode=as.factor(dest_pincode))
@@ -50,6 +50,5 @@ fc<-data.frame(unique(lzn_mapping_2$fc))
 dest_fsn_fc <- merge(dest_fsn,fc,by=NULL) 
 names(dest_fsn_fc)[ncol(dest_fsn_fc)]<- "fc"
 
-vendor_site_2 <- vendor_site %>% group_by(fsn,fc) %>% mutate(vendors=n_distinct(vsid)) #debug this
-vendor_test <- vendor_site %>% select(fsn,fc) %>% distinct 
+vendor_site_2 <- vendor_site %>% group_by(fsn,fc) %>% summarize(vendors=n_distinct(vsid)) %>% as.data.frame()
 
