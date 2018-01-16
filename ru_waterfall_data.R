@@ -39,6 +39,7 @@ vendor_adherence <- read.csv(paste0(ru_path,"/fsn_fc_vendor_adherence.csv"))
 promotions <- read.csv(paste0(ru_path,"/fsn_pincode_promotion_sales.csv"))
 
 #### Basic Data Cleaning ####
+sales_raw %<>% mutate(day=as.Date(as.character(day)))
 sales_raw_2 <- sales_raw %>% filter(week==ru_week)
 sales <- sales_raw_2 %>% filter(fsn!="") %>%
   rename(dest_pincode = destination_pincode) %>%
