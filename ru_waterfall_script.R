@@ -41,7 +41,7 @@ low_sales <- sales_raw %>% filter(day < wk_start_date & day>=wk_start_date-28) %
   filter(sales<min_sales_depth)
 
 low_sale_fsn <- sales_fsn_dp %>% select(fsn) %>% distinct() %>%
-  left_join(low_sales[,c("fsn")], by="fsn") %>% 
+  inner_join(low_sales[,c("fsn")], by="fsn") %>% # to fix low_sale_depth issue
   mutate(low_sale_flag=1)
 
 #### 4.Exclusion Loss ####
@@ -211,6 +211,10 @@ sum(sales_fsn_dp_fc_plc_2$sales,na.rm = T)
 sum(sales_fsn_dp_fc_plc$sales) # Issue in ratio join
 #Note : DO not sum the sales_sum_6 to get DP - FSN level sales
 
+temp_dd <- sales_fsn_dp_fc_plc_2 %>% group_by(fsn,dest_pincode) %>%
+  summarise(ratio_sum=sum(ratio))
+unique(temp_dd$ratio_sum)
+
 # Testing
 sales_fsn_dp_fc_plc_k <- full_join(fsn_dp_fc_ratio_2,sales_fsn_dp_fc_plc,by=c("fsn","dest_pincode","fc"))
 sum(sales_fsn_dp_fc_plc_k$sales,na.rm = T)
@@ -226,6 +230,18 @@ sales_fsn_dp_fc_plc_3 <- left_join(sales_fsn_dp_fc_plc_2,sales_fsn_dp_plc_1[c("f
   mutate(fsn_fc_loss=ratio*fsn_dp_loss)
 sum(sales_fsn_dp_fc_plc_3$fsn_fc_loss,na.rm = T)
 sum(sales_fsn_dp_plc_1$fsn_dp_loss) # Issue in fsn dp loss 
+
+temp_fsn_fc_plc_3 <- sales_fsn_dp_fc_plc_3 %>% group_by(fsn,dest_pincode,ratio) %>%
+  summarise(loss=sum(fsn_fc_loss, na.rm=T)) %>%
+  left_join(sales_fsn_dp_plc_1[c("fsn","dest_pincode","fsn_dp_loss")], by=c("fsn","dest_pincode"))
+
+temp_fsn_fc_plc_31 <- temp_fsn_fc_plc_3 %>% 
+  mutate(fsn_dp_loss=ifelse(is.na(fsn_dp_loss),0,fsn_dp_loss)
+         ,diff = fsn_dp_loss-loss
+  )
+
+temp_fsn_fc_plc_311 <- temp_fsn_fc_plc_31 %>% filter(diff>0)
+
 
 sales_fsn_dp_fc_plc_collated <- join_all(list(sales_fsn_dp_fc_plc_3,forecast_loss[c("fsn","fc","forecast_loss")]
                                           ,override_loss[c("fsn","fc","ndoh_loss","ipc_override_loss","cdo_override_loss","po_loss")]
@@ -283,22 +299,28 @@ ru_loss_fsn_dp <- ru_loss_binded %>% group_by(fsn,dest_pincode) %>%
             ,po_loss = sum(po_loss, na.rm=T)
             ,vendor_adherence_loss = sum(vendor_adherence_loss, na.rm=T)
             ,residual = sum(residual, na.rm=T))
+ru_loss_fsn_dp2 <- ru_loss_fsn_dp %>%
+  left_join(offer_sales_fsn_dp, by=c("fsn","dest_pincode")) %>%
+  mutate(offer_sales=ifelse(is.na(offer_sales),0,offer_sales)
+         ,promotions_loss=pmax(residual-offer_sales,0)
+         ,residual = pmax(residual-promotions_loss,0)
+         )
 
-ru_waterfall <- left_join(sales_fsn_dp,ru_loss_fsn_dp, by=c("fsn","dest_pincode"))
-ru_waterfall[,3:17][is.na(ru_waterfall[,3:17])] <- 0
-ru_waterfall[,3:15][is.na(ru_waterfall[,3:15])] <- 0
+ru_waterfall <- left_join(sales_fsn_dp,ru_loss_fsn_dp2, by=c("fsn","dest_pincode")) %>%
+  select("fsn", "dest_pincode", "sales", "ru_sales", "nat_sales", "serviceability_loss", "vendor_loss", "fe_loss", "forecast_loss", "ndoh_loss", "ipc_override_loss", 
+         "cdo_override_loss", "po_loss", "vendor_adherence_loss", "promotions_loss", "residual")
+ru_waterfall[,3:16][is.na(ru_waterfall[,3:16])] <- 0
 
 sum(ru_waterfall$nat_sales)-
-# sum(ru_waterfall[7:17]) 
-sum(ru_waterfall[6:15]) 
+sum(ru_waterfall[6:16]) 
 
 # Placement issues aggregated correctly
-sum(ru_waterfall[,6:7])
-sum(sales_fsn_dp_no_plc_2$serviceability_loss)+
+sum(ru_waterfall[,6:7])-
+sum(sales_fsn_dp_no_plc_2$serviceability_loss)-
 sum(sales_fsn_dp_no_plc_2$vendor_loss)
 
-# Non placement issues also aggregated correctly
-sum(ru_waterfall[,9:15])
+# Non placement issues also aggregated correctly - power -10 diff
+sum(ru_waterfall[,9:16])-
 sum(sales_fsn_dp_fc_plc_collated[loss_cols])
 sum(sales$nat_sales)
 sum(sales_fsn_dp$nat_sales)
@@ -309,8 +331,11 @@ temp_df5 <- tail(ru_waterfall)
 #### Fetching Keys & exporting waterfall ####
 key_fsn <- sales %>% select(fsn,product_id_key) %>% distinct()
 key_dp <- sales %>% select(dest_pincode, destination_pincode_key) %>% distinct()
-temp_df6 <- temp_df5 %>% left_join(key_fsn, by="fsn") %>% left_join(key_dp, by="dest_pincode") %>% 
+ru_waterfall_output <- ru_waterfall %>% left_join(key_fsn, by="fsn") %>% left_join(key_dp, by="dest_pincode") %>% 
   left_join(preferred_warehouse, by="dest_pincode")
 
-# write.table(temp_df6,"sample_output.tsv",row.names = F,sep="\t")
+sum(is.na(ru_waterfall_output$product_id_key))
+sum(is.na(ru_waterfall_output$destination_pincode_key))
+write.table(ru_waterfall_output,paste0(save_path,"/ru_waterfall.tsv"),row.names = F,sep="\t")
 
+# write.table(head(ru_waterfall_output,100),paste0(save_path,"/ru_waterfall.tsv"),row.names = F,sep="\t")
