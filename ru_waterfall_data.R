@@ -1,6 +1,10 @@
 read_path <- "D:/Pulkit/ru-waterfall/Data"
 # read_path <- "./mnt/rp/ru_waterfall/input"
+# <<<<<<< HEAD
 save_path <- "D:/Pulkit/ru-waterfall"
+# =======
+save_path <- "D:/Pulkit/ru-waterfall/backups/production"
+# >>>>>>> 620a303d04cf883be29b16a255ee51d5d41044c7
 # save_path <- "./mnt/rp/ru_waterfall/output"
 
 
