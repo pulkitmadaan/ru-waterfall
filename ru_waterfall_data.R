@@ -1,6 +1,8 @@
-ru_path <- "D:/Pulkit/ru-waterfall/Data"
-# read_path <- ""
-save_path <- "D:/Pulkit/ru-waterfall/backups/production"
+read_path <- "D:/Pulkit/ru-waterfall/Data"
+# read_path <- "./mnt/rp/ru_waterfall/input"
+save_path <- "D:/Pulkit/ru-waterfall"
+# save_path <- "./mnt/rp/ru_waterfall/output"
+
 
 library(reshape2)
 library(plyr)
@@ -21,22 +23,22 @@ ru_week<-week(wk_end_date)
 
 
 #### Reading Files ####
-# list.files(ru_path)
-sales_raw <- read.csv(paste0(ru_path,"/fsn_fc_pincode_day_sales.csv")
+# list.files(read_path)
+sales_raw <- read.csv(paste0(read_path,"/fsn_fc_pincode_sales.csv")
                      # ,nrows = 1000000
                      )
-lzn_mapping <- read.csv(paste0(ru_path,"/lzn_mapping.csv"))
-vendor_site <- read.csv(paste0(ru_path,"/vendor_site.csv"))
-lead_time <- read.csv(paste0(ru_path,"/fsn_fc_lead_time.csv"))
-cat_lead_time <- read.csv(paste0(ru_path,"/cat_lead_time.csv"))
-min_sale_threshold <- read.csv(paste0(ru_path,"/min_sales_Depth.csv"))
-exclusion_list <- read.csv(paste0(ru_path,"/exclusion_list.csv"))
-preferred_warehouse <- read.table(paste0(ru_path,"/preferred_warehouse.tsv"),header = T)
-# fsn_placement <- read.csv(paste0(ru_path,"/fsn_placement.csv"),nrows=2000)
-fsn_fc_l0 <- read.csv(paste0(ru_path,"/fsn_fc_l0.csv"),nrows=100000) # nulls till 50L
-explain_ff <- read.csv(paste0(ru_path,"/explain_ff.csv"),nrows = 5000000)
-vendor_adherence <- read.csv(paste0(ru_path,"/fsn_fc_vendor_adherence.csv"))
-promotions <- read.csv(paste0(ru_path,"/fsn_pincode_promotion_sales.csv"))
+lzn_mapping <- read.csv(paste0(read_path,"/lzn_mapping.csv"))
+vendor_site <- read.csv(paste0(read_path,"/fsn_fc_vendor.csv"))
+lead_time <- read.csv(paste0(read_path,"/fsn_fc_lead_time.csv"))
+cat_lead_time <- read.csv(paste0(read_path,"/category_lead_time.csv"))
+min_sale_threshold <- read.csv(paste0(read_path,"/cat_min_sales_depth.csv"))
+exclusion_list <- read.csv(paste0(read_path,"/fsn_exclusion_list.csv"))
+preferred_warehouse <- read.table(paste0(read_path,"/preferred_warehouse.tsv"),header = T)
+# fsn_fc_placement <- read.csv(paste0(read_path,"/fsn_fc_placement.csv"),nrows=2000)
+fsn_fc_l0 <- read.csv(paste0(read_path,"/fsn_fc_req_l0.csv"),nrows=100000) # nulls till 50L
+explain_ff <- read.csv(paste0(read_path,"/fsn_fc_explain_ff.csv"),nrows = 5000000)
+vendor_adherence <- read.csv(paste0(read_path,"/fsn_fc_vendor_adherence.csv"))
+offer_sales <- read.csv(paste0(read_path,"/fsn_pincode_offer_sales.csv"))
 
 #### Basic Data Cleaning ####
 sales_raw %<>% mutate(day=as.Date(as.character(day)))
@@ -75,8 +77,8 @@ preferred_warehouse %<>% mutate(pincode=as.factor(as.character(pincode))) %>%
 preferred_fc <- preferred_warehouse %>% mutate(pref_fc=substr(preferred_fc,1,regexpr(',',preferred_fc)-1)) %>%
   select(dest_pincode, pref_fc)
 
-names(promotions) <- c("fsn", "dest_pincode", "day", "week_num", "month", "year", "offer_sales") # to be removed after fact promoted to production
-promotions_fsn_dp <- promotions %>% filter(week_num==ru_week) %>% group_by(fsn, dest_pincode) %>%
-  summarise(offer_sales = sum(offer_sales))
+offer_sales_fsn_dp <- offer_sales %>% filter(week_num==ru_week) %>% group_by(fsn, dest_pincode) %>%
+  summarise(offer_sales = sum(offer_sales)) %>%
+  mutate(dest_pincode=as.factor(as.character(dest_pincode)))
 
 source("fsn_fc_l0_aggregation.R")
