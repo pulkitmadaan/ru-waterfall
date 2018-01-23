@@ -1,3 +1,4 @@
+#### Paths ####
 read_path <- "D:/Pulkit/ru-waterfall/Data"
 # read_path <- "/mnt/rp/ru_waterfall/input"
 
@@ -37,8 +38,13 @@ min_sale_threshold <- read.csv(paste0(read_path,"/cat_min_sales_depth.csv"))
 exclusion_list <- read.csv(paste0(read_path,"/fsn_exclusion_list.csv"))
 preferred_warehouse <- read.table(paste0(read_path,"/preferred_warehouse.tsv"),header = T)
 # fsn_fc_placement <- read.csv(paste0(read_path,"/fsn_fc_placement.csv"),nrows=2000)
-fsn_fc_l0 <- read.csv(paste0(read_path,"/fsn_fc_req_l0.csv"),nrows=100000) # nulls till 50L
-explain_ff <- read.csv(paste0(read_path,"/fsn_fc_explain_ff.csv"),nrows = 5000000)
+fsn_fc_l0 <- read.csv(paste0(read_path,"/fsn_fc_req_l0.csv")
+                      ,stringsAsFactors = F
+                      # ,nrows = 1000
+                      ) # nulls till 50L
+explain_ff <- read.csv(paste0(read_path,"/fsn_fc_explain_ff.csv")
+                       # ,nrows = 5000000
+                       )
 vendor_adherence <- read.csv(paste0(read_path,"/fsn_fc_vendor_adherence.csv"))
 offer_sales <- read.csv(paste0(read_path,"/fsn_pincode_offer_sales.csv"))
 
@@ -64,11 +70,12 @@ vendor_adherence %<>% mutate(poi_created_day = as.Date(as.character(poi_created_
   right_join(fsn_category, by="fsn") # join to be removed, right join to only capture 
 
 cat_lead_time %<>% rename(cat_lead_time = lead_time)
-lead_time %<>% 
+lead_time1  <- lead_time %>% 
   right_join(fsn_category, by="fsn") %>% # join to be removed 
   rename(fc=warehouse) %>%
   left_join(cat_lead_time, by = 'category') %>%
-  mutate(policy_lt=ifelse(lead_time<1,cat_lead_time,lead_time),
+  mutate(lead_time = as.numeric(levels(lead_time))[lead_time],
+         policy_lt=ifelse(lead_time<1,cat_lead_time,lead_time),
          reco_week=week(wk_start_date-policy_lt)) %>% #check if any max treatement needs to be done?
   select(-bu,-super_cat) 
 
@@ -83,7 +90,14 @@ offer_sales_fsn_dp <- offer_sales %>% filter(week_num==ru_week) %>% group_by(fsn
   summarise(offer_sales = sum(offer_sales)) %>%
   mutate(dest_pincode=as.factor(as.character(dest_pincode)))
 
-source("fsn_fc_l0_aggregation.R")
+fsn_fc_l1 <- fsn_fc_l0 %>% rename(fc=warehouse, reco_week=week) %>% 
+  mutate_at(vars(c(starts_with("forecast"), ends_with("qty"))),as.numeric)
+forecast_cols <- c("system_qty", "max_doh_qty", "ipc_reviewed_qty", "cdo_reviewed_qty", "po_qty",
+                   "po_received_qty", "po_rejected_qty", "po_cancel_qty", "forecast_n", "forecast_n1", 
+                   "forecast_n2", "forecast_n3", "forecast_n4", "forecast_n5", "forecast_n6", 
+                   "forecast_n7")
+fsn_fc_l1[forecast_cols][is.na(fsn_fc_l1[forecast_cols])] <- 0
+
 
 #### Placement Issues - Placement NOT Possible ####
 
@@ -179,9 +193,9 @@ sum(sales_fsn_dp_no_plc_2$low_sale_depth_loss)/sum(sales$sales)*100
 sum(sales_fsn_dp_no_plc_2$exclusion_loss)/sum(sales$sales)*100
 sum(sales_fsn_dp_no_plc_2$placement_loss)/sum(sales$sales)*100
 
-temp_df <- sales_fsn_dp_no_plc_2 %>% filter(placement_loss>0)
-sum(temp_df$placement_loss)
-sum(temp_df$nat_sales)
+sales_fsn_dp_no_plc_3 <- sales_fsn_dp_no_plc_2 %>% filter(placement_loss>0)
+sum(sales_fsn_dp_no_plc_3$placement_loss)
+sum(sales_fsn_dp_no_plc_3$nat_sales)
 
 
 # Other sales aggregations
@@ -200,7 +214,7 @@ sales_fsn_dp_fc <- sales %>% group_by(fsn,dest_pincode,fc) %>%
 
 
 #### Placement Possible ####
-#### 4.FE Loss ####
+#### 5.FE Loss ####
 ## Identifying the national fiu ids for alpha sellers (ru leakage) ###
 explain_ff %<>% rename(dest_pincode = destination_pincode)
 nat_fiu <- explain_ff %>%
@@ -217,7 +231,7 @@ fe_issue <- lz_issue %>% group_by(fsn,dest_pincode) %>%
 
 
 #### 6.Forecast Error Loss ####
-reco_leadtime <- inner_join(fsn_fc_l1,lead_time, by=c("fsn","fc","reco_week")) %>%
+reco_leadtime <- inner_join(fsn_fc_l1,lead_time1, by=c("fsn","fc","reco_week")) %>%
   select(-reco_week) %>% 
   mutate(policy_lt_week = ceiling(policy_lt/7),
          forecast_qty = ifelse(policy_lt_week==1,forecast_n,
@@ -249,7 +263,7 @@ override_loss <- reco_leadtime[c("fsn","fc","system_qty","max_doh_qty","ipc_revi
          po_loss=pmax(po_qty-cdo_reviewed_qty,0))
 
 #### 10.Vendor Adherence Loss ####
-vendor_adh <- vendor_adherence %>% left_join(lead_time[c("fsn","fc","policy_lt")], by = c("fsn", "fc")) %>%
+vendor_adh <- vendor_adherence %>% left_join(lead_time1[c("fsn","fc","policy_lt")], by = c("fsn", "fc")) %>%
   left_join(cat_lead_time[c("category","cat_lead_time")], by = "category") %>%
   mutate(policy_lt = ifelse(is.na(policy_lt),cat_lead_time,policy_lt))
 
@@ -271,7 +285,7 @@ sum(vendor_adh_3$vendor_adherence_loss)
 
 #### 12.Joins & final aggregation ####
 sales_fsn_dp_fc_plc <- anti_join(sales_fsn_dp_fc[c("fsn","dest_pincode","fc","sales","ru_sales","nat_sales")],
-                                 sales_fsn_dp_no_plc_2,by=c("fsn","dest_pincode")) # removing fsn-dp where no placement possible
+                                 sales_fsn_dp_no_plc_3,by=c("fsn","dest_pincode")) # removing fsn-dp where no placement possible
 
 # Computing FE loss
 sales_fsn_dp_plc_1 <- sales_fsn_dp_fc_plc %>% group_by(fsn,dest_pincode) %>%
@@ -354,11 +368,11 @@ sales_fsn_dp_fc_plc_collated %<>% mutate(forecast_loss  = pmin(fsn_fc_loss,forec
 
 sum(sales_fsn_dp_fc_plc_collated$fsn_fc_loss)
 loss_cols <- c("forecast_loss", "ndoh_loss", "ipc_override_loss", "cdo_override_loss", "po_loss", "vendor_adherence_loss","temp_var")
-sum(sales_fsn_dp_fc_plc_collated[loss_cols])
+sum(sales_fsn_dp_fc_plc_collated[loss_cols])-
 sum(sales_fsn_dp_fc_plc_3$fsn_fc_loss,na.rm = T) # Attributed correctly
 sum(sales_fsn_dp_plc_1$fsn_dp_loss)
 
-no_placement_loss <- sales_fsn_dp_no_plc_2 %>% 
+no_placement_loss <- sales_fsn_dp_no_plc_3 %>% 
   select(fsn,dest_pincode,serviceability_loss,vendor_loss)
 
 placement_loss_1 <- sales_fsn_dp_plc_1 %>% select(fsn,dest_pincode,fe_loss,exclusion_loss)
@@ -406,15 +420,13 @@ sum(ru_waterfall[,6:7])-
   sum(sales_fsn_dp_no_plc_2$serviceability_loss)-
   sum(sales_fsn_dp_no_plc_2$vendor_loss)
 
-# Non placement issues also aggregated correctly - power -10 diff
+# Non placement issues also aggregated correctly - power -8 diff
 sum(ru_waterfall[,9:16])-
   sum(sales_fsn_dp_fc_plc_collated[loss_cols])
 sum(sales$nat_sales)
 sum(sales_fsn_dp$nat_sales)
 
 
-temp_df5 <- placement_loss_1 %>%  select(fsn, dest_pincode) %>% distinct()
-temp_df5 <- tail(ru_waterfall)
 #### Fetching Keys & exporting waterfall ####
 key_fsn <- sales %>% select(fsn,product_id_key) %>% distinct()
 key_dp <- sales %>% select(dest_pincode, destination_pincode_key) %>% distinct()
@@ -426,4 +438,3 @@ sum(is.na(ru_waterfall_output$destination_pincode_key))
 write.table(ru_waterfall_output,paste0(save_path,"/ru_waterfall.tsv"),row.names = F,sep="\t")
 
 # write.table(head(ru_waterfall_output,100),paste0(save_path,"/ru_waterfall.tsv"),row.names = F,sep="\t")
-
