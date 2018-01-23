@@ -29,7 +29,7 @@ ru_week<-week(wk_end_date)
 # list.files(read_path)
 sales_raw <- read.csv(paste0(read_path,"/fsn_fc_pincode_sales.csv")
                       # ,nrows = 1000000
-)
+                      )
 lzn_mapping <- read.csv(paste0(read_path,"/lzn_mapping.csv"))
 vendor_site <- read.csv(paste0(read_path,"/fsn_fc_vendor.csv"))
 lead_time <- read.csv(paste0(read_path,"/fsn_fc_lead_time.csv"))
@@ -181,6 +181,7 @@ sales_fsn_dp_no_plc_2 <- sales_fsn_dp_no_plc %>%
   )
 
 # Validation
+temp_plc <- sales_fsn_dp_no_plc_2 %>% filter(low_sale_depth_loss>0 & exclusion_loss>0)
 sum(sales_fsn_dp_no_plc_2$serviceability_loss)
 sum(sales_fsn_dp_no_plc_2$vendor_loss)
 sum(sales_fsn_dp_no_plc_2$low_sale_depth_loss)
@@ -216,7 +217,10 @@ sales_fsn_dp_fc <- sales %>% group_by(fsn,dest_pincode,fc) %>%
 #### Placement Possible ####
 #### 5.FE Loss ####
 ## Identifying the national fiu ids for alpha sellers (ru leakage) ###
-explain_ff %<>% rename(dest_pincode = destination_pincode)
+explain_ff %<>% rename(dest_pincode = destination_pincode) %>% mutate(date= as.Date(as.character(day), format = "%Y%m%d"),
+                                     week= week(date)) %>%  
+  filter(week==ru_week)
+
 nat_fiu <- explain_ff %>%
   filter(lzn_value %in% c("N1","N2") & is_accepted=="true") 
 
@@ -225,7 +229,7 @@ lz_issue <- explain_ff %>%   # Identifying the FE issue
          & effective_inventory>0)
 
 fe_issue <- lz_issue %>% group_by(fsn,dest_pincode) %>% 
-  summarize(fe_loss=n_distinct(fiu_id)) %>% 
+  summarize(fe_issue=n_distinct(fiu_id)) %>% 
   mutate(dest_pincode=as.factor(as.character(dest_pincode))) %>%
   as.data.frame()
 
@@ -262,6 +266,9 @@ override_loss <- reco_leadtime[c("fsn","fc","system_qty","max_doh_qty","ipc_revi
          cdo_override_loss=pmax(cdo_reviewed_qty-ipc_reviewed_qty,0),
          po_loss=pmax(po_qty-cdo_reviewed_qty,0))
 
+override_agg <- override_loss[,3:11] %>% 
+  summarise_all(funs(sum))
+
 #### 10.Vendor Adherence Loss ####
 vendor_adh <- vendor_adherence %>% left_join(lead_time1[c("fsn","fc","policy_lt")], by = c("fsn", "fc")) %>%
   left_join(cat_lead_time[c("category","cat_lead_time")], by = "category") %>%
@@ -272,13 +279,11 @@ vendor_adh_2 <- vendor_adh %>%
            # Open till end of previous week
            (po_status == "completed" & (poi_created_day + 2*policy_lt >= wk_start_date))) %>%
   # Closed, but not enough time to replan & make up for it
-  mutate(vendor_adherence_loss = poi_ordered_qty-poi_received_qty) %>%
+  mutate(vendor_adherence_loss = pmax(poi_ordered_qty-poi_received_qty,0)) %>%
   group_by(fsn,fc) %>%
   summarise(vendor_adherence_loss = sum(vendor_adherence_loss))
 
-vendor_adh_3 <-  vendor_adh_2 %>% group_by(fsn,fc) %>%
-  summarise(vendor_adherence_loss=sum(vendor_adherence_loss))
-sum(vendor_adh_3$vendor_adherence_loss)
+min(vendor_adh_2$vendor_adherence_loss)
 
 #### 11.Promotions Loss ####
 # Only to be joined with main sales file 
@@ -287,15 +292,22 @@ sum(vendor_adh_3$vendor_adherence_loss)
 sales_fsn_dp_fc_plc <- anti_join(sales_fsn_dp_fc[c("fsn","dest_pincode","fc","sales","ru_sales","nat_sales")],
                                  sales_fsn_dp_no_plc_3,by=c("fsn","dest_pincode")) # removing fsn-dp where no placement possible
 
+sum(sales_fsn_dp_fc_plc$nat_sales)
+sum(sales_fsn_dp_fc_plc$nat_sales)/sum(sales$sales)*100
+
 # Computing FE loss
 sales_fsn_dp_plc_1 <- sales_fsn_dp_fc_plc %>% group_by(fsn,dest_pincode) %>%
   summarise(nat_sales=sum(nat_sales)) %>%
   left_join(fe_issue, by=c("fsn","dest_pincode")) %>% 
-  left_join(exclusion_list[c("fsn","is_excluded")],by="fsn") %>%
-  mutate(fe_loss = ifelse(is.na(fe_loss),0,fe_loss),
-         is_excluded = ifelse(is.na(is_excluded),0,is_excluded),
-         exclusion_loss = ifelse(is_excluded==1,nat_sales-fe_loss,0),
-         fsn_dp_loss = nat_sales-fe_loss-exclusion_loss)
+  mutate(fe_loss = pmin(ifelse(is.na(fe_issue),0,fe_issue),nat_sales)
+         ,fsn_dp_loss = nat_sales-fe_loss
+  )
+
+max(sales_fsn_dp_plc_1$fsn_dp_loss)
+sum(sales_fsn_dp_plc_1$fe_loss)
+temp_sum <- sales_fsn_dp_plc_1[,3:6] %>% 
+  summarise_all(funs(sum))
+
 
 fsn_dp_fc_ratio <- fsn_dp_fc_vendor %>% filter(is.na(vendor_count)) # Filtering fsn-dp-fc where placement is possible  
 fsn_dp_ratio <- fsn_dp_fc_ratio %>% group_by(fsn,dest_pincode) %>% summarise(fc_count = n_distinct(fc))
@@ -303,9 +315,6 @@ fsn_dp_ratio <- fsn_dp_fc_ratio %>% group_by(fsn,dest_pincode) %>% summarise(fc_
 # n_distinct(lzn$fc) # 59 FCs in lzn file
 fsn_dp_fc_ratio_2 <- left_join(fsn_dp_fc_ratio,fsn_dp_ratio, by=c("fsn","dest_pincode")) %>%
   mutate(ratio=1/fc_count) %>% select(fsn,dest_pincode,fc,ratio)
-
-# sales_fsn_dp_fc_plc_2 <- left_join(fsn_dp_fc_ratio_2,sales_fsn_dp_plc_1[c("fsn","dest_pincode","fsn_dp_loss")],by=c("fsn","dest_pincode")) %>%
-#   mutate(fsn_fc_loss=ratio*fsn_dp_loss)
 
 sales_fsn_dp_fc_plc_2 <- left_join(fsn_dp_fc_ratio_2,sales_fsn_dp_fc_plc,by=c("fsn","dest_pincode","fc"))
 sum(sales_fsn_dp_fc_plc_2$sales,na.rm = T)
@@ -316,68 +325,70 @@ temp_dd <- sales_fsn_dp_fc_plc_2 %>% group_by(fsn,dest_pincode) %>%
   summarise(ratio_sum=sum(ratio))
 unique(temp_dd$ratio_sum)
 
-# Testing
-sales_fsn_dp_fc_plc_k <- full_join(fsn_dp_fc_ratio_2,sales_fsn_dp_fc_plc,by=c("fsn","dest_pincode","fc"))
-sum(sales_fsn_dp_fc_plc_k$sales,na.rm = T)
-sum(sales_fsn_dp_fc_plc$sales) # Issue in ratio join
-#Note : DO not sum the sales_sum_6 to get DP - FSN level sales
-
 temp_da <- sales_fsn_dp_fc_plc_k %>% filter(is.na(ratio))
 sum(temp_da$nat_sales)
 unique(temp_da$fc)
 
 # continue
 sales_fsn_dp_fc_plc_3 <- left_join(sales_fsn_dp_fc_plc_2,sales_fsn_dp_plc_1[c("fsn","dest_pincode","fsn_dp_loss")], by=c("fsn","dest_pincode")) %>%
-  mutate(fsn_fc_loss=ratio*fsn_dp_loss)
-sum(sales_fsn_dp_fc_plc_3$fsn_fc_loss,na.rm = T)
-sum(sales_fsn_dp_plc_1$fsn_dp_loss) # Issue in fsn dp loss 
+  mutate(fsn_dp_fc_loss=ratio*fsn_dp_loss)
+sum(sales_fsn_dp_fc_plc_3$fsn_dp_fc_loss,na.rm = T)-
+sum(sales_fsn_dp_plc_1$fsn_dp_loss) # Main Issue in fsn dp loss 
 
-temp_fsn_fc_plc_3 <- sales_fsn_dp_fc_plc_3 %>% group_by(fsn,dest_pincode,ratio) %>%
-  summarise(loss=sum(fsn_fc_loss, na.rm=T)) %>%
-  left_join(sales_fsn_dp_plc_1[c("fsn","dest_pincode","fsn_dp_loss")], by=c("fsn","dest_pincode"))
-
-temp_fsn_fc_plc_31 <- temp_fsn_fc_plc_3 %>% 
-  mutate(fsn_dp_loss=ifelse(is.na(fsn_dp_loss),0,fsn_dp_loss)
-         ,diff = fsn_dp_loss-loss
-  )
-
-temp_fsn_fc_plc_311 <- temp_fsn_fc_plc_31 %>% filter(diff>0)
+# temp_fsn_fc_plc_3 <- sales_fsn_dp_fc_plc_3 %>% group_by(fsn,dest_pincode,ratio) %>%
+#   summarise(loss=sum(fsn_dp_fc_loss, na.rm=T)) %>%
+#   left_join(sales_fsn_dp_plc_1[c("fsn","dest_pincode","fsn_dp_loss")], by=c("fsn","dest_pincode"))
+# 
+# temp_fsn_fc_plc_31 <- temp_fsn_fc_plc_3 %>% 
+#   mutate(fsn_dp_loss=ifelse(is.na(fsn_dp_loss),0,fsn_dp_loss)
+#          ,diff = fsn_dp_loss-loss
+#   )
+# 
+# temp_fsn_fc_plc_311 <- temp_fsn_fc_plc_31 %>% filter(diff>0)
 
 
 sales_fsn_dp_fc_plc_collated <- join_all(list(sales_fsn_dp_fc_plc_3,forecast_loss[c("fsn","fc","forecast_loss")]
                                               ,override_loss[c("fsn","fc","ndoh_loss","ipc_override_loss","cdo_override_loss","po_loss")]
                                               ,vendor_adh_2[c("fsn","fc","vendor_adherence_loss")]
-),by=c("fsn","fc"),type='left')
+                                              ),by=c("fsn","fc"),type='left')
 
-qty_cols <- c("sales","ru_sales","nat_sales","fsn_dp_loss", "fsn_fc_loss", "forecast_loss", "ndoh_loss", "ipc_override_loss", "cdo_override_loss", "po_loss", "vendor_adherence_loss")
+qty_cols <- c("sales","ru_sales","nat_sales","fsn_dp_loss", "fsn_dp_fc_loss", "forecast_loss", "ndoh_loss", "ipc_override_loss", "cdo_override_loss", "po_loss", "vendor_adherence_loss")
 sales_fsn_dp_fc_plc_collated[qty_cols][is.na(sales_fsn_dp_fc_plc_collated[qty_cols])] <- 0
+sum(sales_fsn_dp_fc_plc_collated$fsn_dp_fc_loss)
+sum(sales_fsn_dp_fc_plc_collated2$forecast_loss)
+sum(forecast_loss$forecast_loss)
 
-
-sales_fsn_dp_fc_plc_collated %<>% mutate(forecast_loss  = pmin(fsn_fc_loss,forecast_loss),
-                                         temp_var = pmax(fsn_fc_loss-forecast_loss,0),
+sales_fsn_dp_fc_plc_collated2 <- sales_fsn_dp_fc_plc_collated %>%
+  mutate(forecast_loss = pmin(fsn_dp_fc_loss,forecast_loss),
+                                         temp_var = pmax(fsn_dp_fc_loss-forecast_loss,0),
                                          ndoh_loss = pmin(temp_var,ndoh_loss),
-                                         temp_var = pmax(temp_var-ndoh_loss,0),
-                                         ipc_override_loss = pmin(temp_var,ipc_override_loss),
-                                         temp_var = pmax(temp_var-ipc_override_loss,0),
-                                         cdo_override_loss = pmin(temp_var,cdo_override_loss),
-                                         temp_var = pmax(temp_var-cdo_override_loss,0),
-                                         po_loss = pmin(temp_var,po_loss), # check if this needs to exist
-                                         temp_var = pmax(temp_var-po_loss,0),
-                                         vendor_adherence_loss = pmin(temp_var,vendor_adherence_loss),
-                                         temp_var = pmax(temp_var-vendor_adherence_loss,0))
+                                         temp_var2 = pmax(temp_var-ndoh_loss,0),
+                                         ipc_override_loss = pmin(temp_var2,ipc_override_loss),
+                                         temp_var3 = pmax(temp_var2-ipc_override_loss,0),
+                                         cdo_override_loss = pmin(temp_var3,cdo_override_loss),
+                                         temp_var4 = pmax(temp_var3-cdo_override_loss,0),
+                                         po_loss = pmin(temp_var4,po_loss), # check if this needs to exist
+                                         temp_var5 = pmax(temp_var4-po_loss,0),
+                                         vendor_adherence_loss = pmin(temp_var5,vendor_adherence_loss),
+                                         temp_var6 = pmax(temp_var5-vendor_adherence_loss,0))
 
-sum(sales_fsn_dp_fc_plc_collated$fsn_fc_loss)
-loss_cols <- c("forecast_loss", "ndoh_loss", "ipc_override_loss", "cdo_override_loss", "po_loss", "vendor_adherence_loss","temp_var")
-sum(sales_fsn_dp_fc_plc_collated[loss_cols])-
-sum(sales_fsn_dp_fc_plc_3$fsn_fc_loss,na.rm = T) # Attributed correctly
-sum(sales_fsn_dp_plc_1$fsn_dp_loss)
+
+loss_cols <- c("forecast_loss", "ndoh_loss", "ipc_override_loss", "cdo_override_loss", "po_loss", "vendor_adherence_loss","temp_var6")
+sum(sales_fsn_dp_fc_plc_collated2[loss_cols])
+sum(sales_fsn_dp_fc_plc_3$fsn_dp_fc_loss,na.rm = T) # Attributed correctly
+
+ru_agg2 <- sales_fsn_dp_fc_plc_collated2[,6:21] %>% 
+  summarise_all(funs(sum))
+
+
+
 
 no_placement_loss <- sales_fsn_dp_no_plc_3 %>% 
   select(fsn,dest_pincode,serviceability_loss,vendor_loss)
 
 placement_loss_1 <- sales_fsn_dp_plc_1 %>% select(fsn,dest_pincode,fe_loss,exclusion_loss)
 
-placement_loss_2 <- sales_fsn_dp_fc_plc_collated %>% group_by(fsn,dest_pincode) %>%
+placement_loss_2 <- sales_fsn_dp_fc_plc_collated2%>% group_by(fsn,dest_pincode) %>%
   summarise(forecast_loss = sum(forecast_loss, na.rm=T),
             ndoh_loss = sum(ndoh_loss, na.rm=T),
             ipc_override_loss = sum(ipc_override_loss, na.rm=T),
@@ -400,6 +411,7 @@ ru_loss_fsn_dp <- ru_loss_binded %>% group_by(fsn,dest_pincode) %>%
             ,po_loss = sum(po_loss, na.rm=T)
             ,vendor_adherence_loss = sum(vendor_adherence_loss, na.rm=T)
             ,residual = sum(residual, na.rm=T))
+# Joining Promotions Loss
 ru_loss_fsn_dp2 <- ru_loss_fsn_dp %>%
   left_join(offer_sales_fsn_dp, by=c("fsn","dest_pincode")) %>%
   mutate(offer_sales=ifelse(is.na(offer_sales),0,offer_sales)
@@ -412,6 +424,14 @@ ru_waterfall <- left_join(sales_fsn_dp,ru_loss_fsn_dp2, by=c("fsn","dest_pincode
          "cdo_override_loss", "po_loss", "vendor_adherence_loss", "promotions_loss", "residual")
 ru_waterfall[,3:16][is.na(ru_waterfall[,3:16])] <- 0
 
+ru_agg <- ru_waterfall[,3:16] %>% 
+  summarise_all(funs(sum))
+
+test_df <- colSums(ru_waterfall[,c("ru_sales", "nat_sales", "serviceability_loss", "vendor_loss", "fe_loss", "forecast_loss", "ndoh_loss", "ipc_override_loss", 
+                        "cdo_override_loss", "po_loss", "vendor_adherence_loss", "promotions_loss", "residual")]) %>%
+  as.data.frame()
+
+# Final Diff
 sum(ru_waterfall$nat_sales)-
   sum(ru_waterfall[6:16]) 
 
