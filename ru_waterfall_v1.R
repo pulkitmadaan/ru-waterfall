@@ -1,9 +1,12 @@
-#### Paths ####
-# read_path <- "D:/Pulkit/ru-waterfall/Data"
-read_path <- "/mnt/rp/ru_waterfall/input"
+# Input: sales_raw, lzn_mapping, vendor_site, lead_time, cat_lead_time, min_sale_threshold, exclusion_list, preferred_warehouse, fsn_fc_l0, explain_ff, vendor_adherence, offer_sales
+# Output: ru_waterfall_output
 
-# save_path <- "D:/Pulkit/ru-waterfall/Output"
-save_path <- "/mnt/rp/ru_waterfall/output"
+#### Paths ####
+read_path <- "D:/Pulkit/ru-waterfall/Data"
+# read_path <- "/mnt/rp/ru_waterfall/input"
+
+save_path <- "D:/Pulkit/ru-waterfall/Output"
+# save_path <- "/mnt/rp/ru_waterfall/output"
 
 # Loading Libraries
 
@@ -26,7 +29,8 @@ ru_week<-week(wk_end_date)
 leadtime_start_date<-wk_start_date-70 # 10 weeks
 low_sales_end_date <- as.numeric(format(wk_end_date, format="%Y%m%d"))  # Check using below or not
 low_sales_start_date <- as.numeric(format(wk_end_date-28, format="%Y%m%d"))
-
+wk_start_date_key <- as.numeric(format(wk_start_date, format="%Y%m%d"))
+ru_year <- year(wk_end_date)
 
 #### Reading Files ####
 # list.files(read_path)
@@ -80,7 +84,8 @@ lead_time1  <- lead_time %>%
   right_join(fsn_category, by="fsn") %>% # join to be removed 
   rename(fc=warehouse) %>%
   left_join(cat_lead_time, by = 'category') %>%
-  mutate(lead_time = as.numeric(levels(lead_time))[lead_time],
+  mutate(
+    # lead_time = as.numeric(levels(lead_time))[lead_time],
          policy_lt=ifelse(lead_time<1,cat_lead_time,lead_time),
          reco_week=week(wk_start_date-policy_lt)) %>% #check if any max treatement needs to be done?
   select(-bu,-super_cat) 
@@ -391,8 +396,12 @@ ru_loss_fsn_dp2 <- ru_loss_fsn_dp %>%
   )
 
 ru_waterfall <- left_join(sales_fsn_dp,ru_loss_fsn_dp2, by=c("fsn","dest_pincode")) %>%
-  mutate(ru_computed_week=ru_week, unmapped_sales=sales-ru_sales-nat_sales) %>% # calculating Unmapped sales
-  select("fsn", "dest_pincode", "ru_computed_week", "sales", "ru_sales", "nat_sales"
+  mutate(ru_computed_week=ru_week
+         ,unmapped_sales=sales-ru_sales-nat_sales # calculating Unmapped sales
+         ,ru_year=ru_year
+         ,week_start_date_key=wk_start_date_key) %>% 
+  select("fsn", "dest_pincode", "ru_computed_week","ru_year", "week_start_date_key"
+         ,"sales", "ru_sales", "nat_sales"
          , "unmapped_sales"
          , "serviceability_loss", "vendor_loss","low_sale_depth_loss","exclusion_loss", "fe_loss", 
          "forecast_loss", "ndoh_loss", "ipc_override_loss", "cdo_override_loss"
@@ -400,8 +409,8 @@ ru_waterfall <- left_join(sales_fsn_dp,ru_loss_fsn_dp2, by=c("fsn","dest_pincode
          , "vendor_adherence_loss", "promotions_loss", "residual")
   
 ## With unmapped sales - uncomment while including unmapped sales
-ru_waterfall[,4:20][is.na(ru_waterfall[,4:20])] <- 0
-ru_agg <- ru_waterfall[,4:20] %>%
+ru_waterfall[,6:22][is.na(ru_waterfall[,6:22])] <- 0
+ru_agg <- ru_waterfall[,6:22] %>%
   summarise_all(funs(sum)) %>% mutate(ru_computed_week = ru_week)
 
 write.csv(ru_agg,paste0(save_path,"/ru_agg_wk",ru_week,".csv"),row.names = F)
@@ -418,12 +427,12 @@ ru_waterfall_output <- ru_waterfall %>% left_join(key_fsn, by="fsn") %>% left_jo
 # temp_key <- sales[is.na(sales$product_id_key),]
 # sum(is.na(ru_waterfall_output$destination_pincode_key))
 
-temp_ru <- head(ru_waterfall_output,100)
-# write.table(ru_waterfall_output,paste0(save_path,"/ru_waterfall.tsv"),row.names = F,sep="\t")
+# temp_ru <- head(ru_waterfall_output,100)
+# write.csv(temp_ru,paste0(save_path,"/ru_waterfall_sample.csv"),row.names = F)
 # write.table(ru_waterfall_output,paste0(save_path,"/ru_waterfall_wk",ru_week,".tsv"),row.names = F,sep="\t")
 # fwrite(ru_waterfall_output,paste0(save_path,"/ru_waterfall_wk",ru_week,".tsv"),sep="\t") # For testing & debugging, weekname in output filename
 
 fwrite(ru_waterfall_output,paste0(save_path,"/ru_waterfall_output.tsv"),sep="\t")
 
 # save.image(paste0(save_path,"/ru_waterfall_wk",ru_week,".RData"))
-# write.csv(head(ru_waterfall_output,100),paste0(save_path,"/ru_waterfall.tsv"),row.names = F,sep="\t")
+
