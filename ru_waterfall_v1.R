@@ -1,5 +1,7 @@
-# Input: sales_raw, lzn_mapping, vendor_site, lead_time, cat_lead_time, min_sale_threshold, exclusion_list, preferred_warehouse, fsn_fc_l0, explain_ff, vendor_adherence, offer_sales
+# Input: sales_raw, lzn_mapping, vendor_site, vendorSite, lead_time, cat_lead_time, min_sale_threshold, exclusion_list, preferred_warehouse, fsn_fc_l0, explain_ff, vendor_adherence, offer_sales
 # Output: ru_waterfall_output
+
+# vendor logic updated
 
 #### Paths ####
 read_path <- "D:/Pulkit/ru-waterfall/Data"
@@ -9,7 +11,6 @@ save_path <- "D:/Pulkit/ru-waterfall/Output"
 # save_path <- "/mnt/rp/ru_waterfall/output"
 
 # Loading Libraries
-
 library(reshape2)
 library(plyr)
 library(dplyr)
@@ -26,9 +27,9 @@ today<-Sys.Date()-1
 wk_end_date <-today-wday(today)
 wk_start_date <-wk_end_date-6
 ru_week<-week(wk_end_date)
-leadtime_start_date<-wk_start_date-70 # 10 weeks
-low_sales_end_date <- as.numeric(format(wk_end_date, format="%Y%m%d"))  # Check using below or not
-low_sales_start_date <- as.numeric(format(wk_end_date-28, format="%Y%m%d"))
+# leadtime_start_date <-wk_start_date-70 # 10 weeks
+# low_sales_end_date <- as.numeric(format(wk_end_date, format="%Y%m%d"))  # Check using below or not
+# low_sales_start_date <- as.numeric(format(wk_end_date-28, format="%Y%m%d"))
 wk_start_date_key <- as.numeric(format(wk_start_date, format="%Y%m%d"))
 ru_year <- year(wk_end_date)
 
@@ -55,6 +56,11 @@ explain_ff <- fread(paste0(read_path,"/fsn_fc_explain_ff.csv")
 vendor_adherence <- fread(paste0(read_path,"/fsn_fc_vendor_adherence.csv"))
 offer_sales <- fread(paste0(read_path,"/fsn_pincode_offer_sales.csv"))
 
+vendorSite <- read.csv(paste0(read_path,"/fsn_fc_vendor2.csv"))
+names(vendorSite) <- c("vsid", "fsn", "fc", "BU", "supCat","category","vertical", "brand", "po_ordered_qty","po_received_qty")
+
+vendorSite2 <- vendorSite %>% group_by(brand,vertical,fc) %>% summarize(brand_vendor_count=n_distinct(vsid)) %>% as.data.frame()
+
 #### Basic Data Cleaning ####
 sales_raw %<>% mutate(day=as.Date(as.character(day)))
 sales_raw_2 <- sales_raw %>% filter(week==ru_week)
@@ -65,6 +71,7 @@ sales <- sales_raw_2 %>% filter(fsn!="") %>%
          ,source_pincode = as.factor(source_pincode))
 
 sum(sales$unmapped_sales)
+sum(sales$sales)
 
 lzn <- lzn_mapping %>% filter(lzn_value!="" & lzn_value!='0' & lzn_value!='NULL') %>%
   rename(fc=src_fc_code) %>%
@@ -72,7 +79,7 @@ lzn <- lzn_mapping %>% filter(lzn_value!="" & lzn_value!='0' & lzn_value!='NULL'
 
 lz <- lzn %>% filter(lzn_value %in% c("L1","L2","Z1","Z2")) 
 
-vendor_site_2 <- vendor_site %>% group_by(fsn,fc) %>% summarize(vendor_count=n_distinct(vsid)) %>% as.data.frame()
+vendor_site_2 <- vendor_site %>% group_by(fsn,fc) %>% summarize(fsn_vendor_count=n_distinct(vsid)) %>% as.data.frame()
 
 fsn_category <- sales[!duplicated(sales[,c(3,7)]),c(3,7)] # Fsn - category list for week's sales
 
@@ -135,8 +142,12 @@ names(fsn_dp_fc)[ncol(fsn_dp_fc)] <- "fc"
 
 fsn_dp_fc_lz <- inner_join(fsn_dp_fc,lz,by=c("dest_pincode","fc")) # inner join to keeping only lz FCs to sales dest pincodes & sales fsns
 
-fsn_dp_fc_vendor <- fsn_dp_fc_lz %>% select(fsn,dest_pincode,fc) %>% distinct() %>%
-  left_join(vendor_site_2,by=c("fsn","fc")) # joining vendor info
+fsn_dp_fc_vendor <- fsn_dp_fc_lz %>% select(fsn,dest_pincode,brand, vertical,fc) %>% distinct() %>%
+  left_join(vendor_site_2,by=c("fsn","fc")) %>%
+  left_join(vendorSite2, by=c("brand","vertical","fc")) %>% # joining vendor info
+  mutate(fsn_vendor_count = ifelse(is.na(fsn_vendor_count),0,fsn_vendor_count)
+         ,brand_vendor_count = ifelse(is.na(brand_vendor_count),0,brand_vendor_count)
+         ,vendor_count = fsn_vendor_count+brand_vendor_count)
 
 fsn_dp_vendor <- fsn_dp_fc_vendor %>% group_by(fsn,dest_pincode) %>%
   summarise(vendor_count=sum(vendor_count,na.rm=T)) %>%
@@ -164,6 +175,14 @@ sales_fsn_dp <- sales %>% group_by(fsn,dest_pincode) %>%
             ,nat_sales=sum(nat_sales)
             # ,rru_sales=sum(rru_sales)
   )
+
+sales_fsn_dp_bu <- sales %>% group_by(fsn,bu,super_category,category,vertical,brand,dest_pincode) %>%
+  summarise(sales=sum(sales)
+            ,ru_sales=sum(ru_sales)
+            ,nat_sales=sum(nat_sales)
+            # ,rru_sales=sum(rru_sales)
+  )
+
 
 # Creating low sale flag
 low_sale_fsn <- sales_fsn_dp %>% select(fsn) %>% distinct() %>%
@@ -230,7 +249,7 @@ explain_ff %<>% rename(dest_pincode = destination_pincode) %>% mutate(date= as.D
   filter(week==ru_week)
 
 nat_fiu <- explain_ff %>%
-  filter(lzn_value %in% c("N1","N2") & is_accepted=="true") 
+  filter(lzn_value %in% c("N1","N2") & (is_accepted=="true" | is_accepted=="TRUE" | is_accepted==1) )
 
 lz_issue <- explain_ff %>%   # Identifying the FE issue
   filter(fiu_id %in% nat_fiu$fiu_id & (lzn_value %in% c("L1","L2","Z1","Z2")) 
@@ -264,8 +283,8 @@ forecast_issue <- left_join(sales_fsn_pref_fc,reco_leadtime[c("fsn","fc","foreca
          forecast_issue=pmax(sales-forecast_qty,0)) %>%
   rename(fc=pref_fc)
 
-forecast_flag = ifelse(sum(sales$sales)-sum(forecast_issue$sales)==0,"forecast_loss = Ok",
-                       sum(sales$sales)-sum(forecast_issue$sales))
+# forecast_flag = ifelse(sum(sales$sales)-sum(forecast_issue$sales)==0,"forecast_loss = Ok",
+#                        sum(sales$sales)-sum(forecast_issue$sales))
 
 #### 7-9.N-DOH, IPC Override, CDO Override Loss ####
 override_loss <- reco_leadtime[c("fsn","fc","system_qty","max_doh_qty","ipc_reviewed_qty","cdo_reviewed_qty","po_qty")] %>%
@@ -395,7 +414,7 @@ ru_loss_fsn_dp2 <- ru_loss_fsn_dp %>%
          ,residual = pmax(residual-promotions_loss,0)
   )
 
-ru_waterfall <- left_join(sales_fsn_dp,ru_loss_fsn_dp2, by=c("fsn","dest_pincode")) %>%
+ru_waterfall <- left_join(sales_fsn_dp_bu,ru_loss_fsn_dp2, by=c("fsn","dest_pincode")) %>%
   mutate(ru_computed_week=ru_week
          ,unmapped_sales=sales-ru_sales-nat_sales # calculating Unmapped sales
          ,ru_year=ru_year
@@ -406,7 +425,9 @@ ru_waterfall <- left_join(sales_fsn_dp,ru_loss_fsn_dp2, by=c("fsn","dest_pincode
          , "serviceability_loss", "vendor_loss","low_sale_depth_loss","exclusion_loss", "fe_loss", 
          "forecast_loss", "ndoh_loss", "ipc_override_loss", "cdo_override_loss"
          , "po_loss"
-         , "vendor_adherence_loss", "promotions_loss", "residual")
+         , "vendor_adherence_loss", "promotions_loss", "residual"
+         , "bu","super_category" ,"category", "vertical", "brand"
+         )
   
 ## With unmapped sales - uncomment while including unmapped sales
 ru_waterfall[,6:22][is.na(ru_waterfall[,6:22])] <- 0
@@ -417,10 +438,12 @@ write.csv(ru_agg,paste0(save_path,"/ru_agg_wk",ru_week,".csv"),row.names = F)
 
 #### Fetching Keys & exporting waterfall ####
 key_fsn <- sales %>% select(fsn,product_id_key) %>% distinct()
+# key_fsn_temp <- sales %>% group_by(fsn) %>% summarise(key_count=n_distinct(product_id_key)) %>% arrange(-key_count)
 key_dp <- sales %>% select(dest_pincode, destination_pincode_key) %>% distinct()
 # key_dp_temp <- sales %>% group_by(dest_pincode) %>% summarise(key_count=n_distinct(destination_pincode_key)) %>% arrange(-key_count)
 ru_waterfall_output <- ru_waterfall %>% left_join(key_fsn, by="fsn") %>% left_join(key_dp, by="dest_pincode") %>% 
   left_join(preferred_warehouse, by="dest_pincode")
+# pref_wh_temp <- preferred_warehouse %>% group_by(dest_pincode) %>% summarise(key_count=n_distinct(preferred_fc)) %>% arrange(-key_count)
 
 # ru_waterfall_output <- ru_waterfall
 # sum(is.na(ru_waterfall_output$product_id_key))
@@ -433,6 +456,6 @@ ru_waterfall_output <- ru_waterfall %>% left_join(key_fsn, by="fsn") %>% left_jo
 # fwrite(ru_waterfall_output,paste0(save_path,"/ru_waterfall_wk",ru_week,".tsv"),sep="\t") # For testing & debugging, weekname in output filename
 
 fwrite(ru_waterfall_output,paste0(save_path,"/ru_waterfall_output.tsv"),sep="\t")
-
+fwrite(ru_waterfall,paste0(save_path,"/ru_waterfall.tsv"),sep="\t")
 # save.image(paste0(save_path,"/ru_waterfall_wk",ru_week,".RData"))
 
