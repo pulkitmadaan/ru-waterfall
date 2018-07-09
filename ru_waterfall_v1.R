@@ -1,14 +1,12 @@
 # Input: sales_raw, lzn_mapping, vendor_site, vendorSite, lead_time, cat_lead_time, min_sale_threshold, exclusion_list, preferred_warehouse, fsn_fc_l0, explain_ff, vendor_adherence, offer_sales
 # Output: ru_waterfall_output
 
-# vendor logic updated
-
 #### Paths ####
-read_path <- "D:/Pulkit/ru-waterfall/Data"
-# read_path <- "/mnt/rp/ru_waterfall/input"
+# read_path <- "D:/Pulkit/ru-waterfall/Data"
+read_path <- "/mnt/rp/ru_waterfall/input"
 
-save_path <- "D:/Pulkit/ru-waterfall/Output"
-# save_path <- "/mnt/rp/ru_waterfall/output"
+# save_path <- "D:/Pulkit/ru-waterfall/Output"
+save_path <- "/mnt/rp/ru_waterfall/output"
 
 # Loading Libraries
 library(reshape2)
@@ -62,7 +60,8 @@ names(vendorSite) <- c("vsid", "fsn", "fc", "BU", "supCat","category","vertical"
 vendorSite2 <- vendorSite %>% group_by(brand,vertical,fc) %>% summarize(brand_vendor_count=n_distinct(vsid)) %>% as.data.frame()
 
 #### Basic Data Cleaning ####
-sales_raw %<>% mutate(day=as.Date(as.character(day)))
+sales_raw %<>% mutate(day=as.Date(as.character(day))) %>%
+  filter(fc != 'blr_grocery_nelm_01')
 sales_raw_2 <- sales_raw %>% filter(week==ru_week)
 sales <- sales_raw_2 %>% filter(fsn!="") %>%
   rename(dest_pincode = destination_pincode) %>%
@@ -426,7 +425,7 @@ ru_waterfall <- left_join(sales_fsn_dp_bu,ru_loss_fsn_dp2, by=c("fsn","dest_pinc
          "forecast_loss", "ndoh_loss", "ipc_override_loss", "cdo_override_loss"
          , "po_loss"
          , "vendor_adherence_loss", "promotions_loss", "residual"
-         , "bu","super_category" ,"category", "vertical", "brand"
+         # , "bu","super_category" ,"category", "vertical", "brand"
          )
   
 ## With unmapped sales - uncomment while including unmapped sales
@@ -456,6 +455,6 @@ ru_waterfall_output <- ru_waterfall %>% left_join(key_fsn, by="fsn") %>% left_jo
 # fwrite(ru_waterfall_output,paste0(save_path,"/ru_waterfall_wk",ru_week,".tsv"),sep="\t") # For testing & debugging, weekname in output filename
 
 fwrite(ru_waterfall_output,paste0(save_path,"/ru_waterfall_output.tsv"),sep="\t")
-fwrite(ru_waterfall,paste0(save_path,"/ru_waterfall.tsv"),sep="\t")
+# fwrite(ru_waterfall,paste0(save_path,"/ru_waterfall.tsv"),sep="\t")
 # save.image(paste0(save_path,"/ru_waterfall_wk",ru_week,".RData"))
 
