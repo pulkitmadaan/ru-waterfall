@@ -62,7 +62,8 @@ names(vendorSite) <- c("vsid", "fsn", "fc", "BU", "supCat","category","vertical"
 vendorSite2 <- vendorSite %>% group_by(brand,vertical,fc) %>% summarize(brand_vendor_count=n_distinct(vsid)) %>% as.data.frame()
 
 #### Basic Data Cleaning ####
-sales_raw %<>% mutate(day=as.Date(as.character(day)))
+sales_raw %<>% mutate(day=as.Date(as.character(day))) %>%
+  filter(fc != 'blr_grocery_nelm_01')
 sales_raw_2 <- sales_raw %>% filter(week==ru_week)
 sales <- sales_raw_2 %>% filter(fsn!="") %>%
   rename(dest_pincode = destination_pincode) %>%
